@@ -1,0 +1,262 @@
+---
+title: "StopAndSearch"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning = FALSE)
+
+#Check, install, and load packages
+check_and_install <- function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+#Required packages
+additional_packages <- c(
+  "dplyr",      # Data manipulation
+  "ggplot2",    # Data visualization
+  "knitr",      # Dynamic report generation
+  "hrbrthemes", # Themes for ggplot2
+  "tidyverse"   # Data manipulation, visualization, and more (includes dplyr, ggplot2, etc.)
+)
+
+lapply(additional_packages, check_and_install)
+```
+
+
+
+```{r upload data}
+StopAndSearch <- read.csv("finaldataset.csv")
+
+
+```
+
+```{r cleaning data}
+StopAndSearch <- filter(StopAndSearch, Type!="Type")
+StopAndSearch$Type <- as.factor(StopAndSearch$Type)
+StopAndSearch$Date <- as.Date(StopAndSearch$Date)
+StopAndSearch <- select(StopAndSearch, -c(Part.of.a.policing.operation, Policing.operation, Legislation))
+StopAndSearch$Age.range <- as.factor(StopAndSearch$Age.range)
+levels(StopAndSearch$Age.range) <- c(NA,"18-24","25-34","11-17","over 34","under 10")
+StopAndSearch$Age.range <- factor(StopAndSearch$Age.range,levels= c(NA,"under 10","11-17","18-24","25-34","over 34"))
+
+StopAndSearch$Latitude <- as.numeric(StopAndSearch$Latitude)
+StopAndSearch$Longitude <- as.numeric(StopAndSearch$Longitude)
+StopAndSearch$Gender <- as.factor(StopAndSearch$Gender)
+levels(StopAndSearch$Gender) <- c(NA,"Female","Male", "Other")
+StopAndSearch$Self.defined.ethnicity <- as.factor(StopAndSearch$Self.defined.ethnicity)
+StopAndSearch <- mutate(StopAndSearch, Officer.defined.ethnicity = case_when(
+    Officer.defined.ethnicity == "" ~ as.character(NA),
+     TRUE ~  Officer.defined.ethnicity
+  ))
+StopAndSearch$Officer.defined.ethnicity <- as.factor(StopAndSearch$Officer.defined.ethnicity )
+
+StopAndSearch$Object.of.search <- as.factor(StopAndSearch$Object.of.search)
+StopAndSearch$Outcome.linked.to.object.of.search <- as.factor(StopAndSearch$Outcome.linked.to.object.of.search)
+levels(StopAndSearch$Outcome.linked.to.object.of.search) <- c(NA, FALSE,TRUE)
+StopAndSearch$Removal.of.more.than.just.outer.clothing <- as.factor(StopAndSearch$Removal.of.more.than.just.outer.clothing)
+levels(StopAndSearch$Removal.of.more.than.just.outer.clothing) <- c(NA,FALSE,TRUE)
+StopAndSearch$Force <- as.factor(StopAndSearch$Force)
+```
+
+
+
+
+
+
+```{r pressure, create count }
+##Creates table with stop-and-search count 
+miniStopSearch <- {StopAndSearch %>%
+     group_by(Force)%>%
+  select(Officer.defined.ethnicity) %>%
+  add_count(Officer.defined.ethnicity) %>%
+  distinct()}
+
+```
+
+
+```{r pressure, }
+#Obtained from second dataset
+DemoCleveland <-c(NA,17400,526456,3200,10100)
+DemoLincoln <- c(696484,2600,5579,NA,9000)
+DemoMersey <- c(1305303,14500,NA,30405,30386)
+
+totalControlled <- sum(miniStopSearch$n) 
+miniStopSearch <- miniStopSearch %>%
+  ungroup()%>%
+  mutate(Overall.Population =c(DemoCleveland,DemoLincoln,DemoMersey))%>% 
+  mutate(perc = round(n/Overall.Population*100))%>%
+mutate(rest= 100-round(n/Overall.Population*100))
+
+miniStopSearch$year <- "2020" #dummy variable for x-axis in the stacked plot
+
+
+```
+
+
+## PLOT 1
+
+```{r,  }
+
+miniStopSearch <- arrange(miniStopSearch,Officer.defined.ethnicity)
+tinyStopSearch <- select(miniStopSearch,Force,Officer.defined.ethnicity,perc)%>%na.omit()
+
+
+ ggplot(tinyStopSearch, aes(x = perc,  y = Force)) +
+  geom_segment(data=tinyStopSearch %>%
+     group_by(Force)%>%
+     top_n(-1)%>%
+     slice(1)%>%
+     ungroup(),
+     aes(x=0,xend=35, yend= Force),
+    linetype = "dotted", size = 0.5, color = "gray80")+
+  geom_segment(
+    data = tinyStopSearch %>% 
+      group_by(Force) %>% 
+      summarise(start = range(perc)[1], end = range(perc)[2]) %>% 
+      ungroup(),
+    aes(x = start, xend = end, y = Force, yend = Force),
+    color = "grey80", size = 2
+  )+
+
+  geom_point(
+    aes(perc, Force, color = Officer.defined.ethnicity), 
+    size = 4,position = position_jitter(w = 0.6, h = 0)
+  ) +
+   scale_x_comma(position = "bottom", limits = c(0, 35)) +
+  scale_color_ipsum(name = "Officer-defined Ethnicity") +
+  labs(
+    x = "Number of incidents per 100 individuals", y = NULL,
+    title = "Number of Stop-and-Searches per ethnicity",
+    subtitle = "Per 100 individuals, Dec.2018 to Sept. 2021"
+  ) +
+  theme_ipsum_rc(grid = "X")  
+  
+```
+
+
+
+
+```{r}
+StopAndSearch <-  mutate(StopAndSearch, Outcome = case_when(
+    `Outcome` == "Arrest" ~ "Further Action",
+    `Outcome` == "Caution (simple or conditional)" ~ "Further Action",
+    `Outcome` == "Community resolution" ~ "Further Action",
+    `Outcome` == "Khat or Cannabis warning" ~ "Further Action",
+    `Outcome` == "Penalty Notice for Disorder" ~ "Further Action",
+    `Outcome` == "Summons / charged by post" ~ "Further Action",
+    `Outcome` == "" ~ "No Further Action",
+    `Outcome` == "A no further action disposal" ~ "No Further Action",
+    TRUE ~ `Outcome`
+  ))%>%
+  arrange(Force, Officer.defined.ethnicity,Outcome)
+
+OutcomeStopSearch <- select(StopAndSearch, Force, Officer.defined.ethnicity,Outcome)%>%
+     group_by(Force)%>%
+  add_count(Officer.defined.ethnicity) %>%
+  distinct()%>%
+  ungroup()
+  
+
+by_sanction <- select(StopAndSearch, Force, Officer.defined.ethnicity,Outcome)%>%
+     group_by(Force, Officer.defined.ethnicity)%>%
+  add_count(Outcome) %>%
+  distinct()%>%
+  ungroup()
+
+colnames(by_sanction)[colnames(by_sanction) %in% c("n")] <- c("TotalSS")
+
+TotalSS <- select(by_sanction, TotalSS)
+
+OutcomeStopSearch <- mutate(OutcomeStopSearch, TotalSS)
+OutcomeStopSearch <- mutate(OutcomeStopSearch, perc=round((TotalSS/n)*100))
+OutcomeStopSearch <- filter(OutcomeStopSearch, Outcome=="Further Action")%>%na.omit()
+  
+
+
+```
+
+## PLOT 2
+```{r, }
+ggplot(OutcomeStopSearch, aes(x = perc,  y = Force)) +
+  geom_segment(data=OutcomeStopSearch %>%
+     group_by(Force)%>%
+     top_n(-1)%>%
+     slice(1)%>%
+     ungroup(),
+     aes(x=0,xend=30, yend= Force),
+    linetype = "dotted", size = 0.5, color = "gray80")+
+  geom_segment(
+    data = OutcomeStopSearch %>% 
+      group_by(Force) %>% 
+      summarise(start = range(perc)[1], end = range(perc)[2]) %>% 
+      ungroup(),
+    aes(x = start, xend = end, y = Force, yend = Force),
+    color = "grey80", size = 2
+  )+
+
+  geom_point(
+    aes(perc, Force, color = Officer.defined.ethnicity), 
+    size = 4, position = position_jitter(w = 0.6, h = 0)
+  ) +
+   scale_x_comma(position = "bottom", limits = c(0, 30)) +
+  scale_color_ipsum(name = "Officer-defined Ethnicity") +
+  labs(
+    x = "Percentage of Stop-and-Searches that result in Further Action", y = NULL,
+    title = " Stop-and-Searches that Result in Further Action",
+    subtitle =  "By ethnicity, Dec. 2018 to Sept. 2021"
+  ) +
+  theme_ipsum_rc(grid = "X")
+  
+```
+
+
+
+```{r, timeseries  data, exclude=TRUE}
+TimeData <- read.csv("stop-and-search-data.csv")
+TimeData <- TimeData %>%
+    filter(Geography %in% c("Cleveland", "Lincolnshire", "Merseyside")) %>%
+    filter(Legislation_type %in% "All")%>%
+    filter(Ethnicity %in% c("Asian","White","Black","Mixed","Other")) %>%
+    select(Time, Ethnicity, Geography, Rate.per.1.000.population.by.ethnicity)
+
+TimeData <- mutate(TimeData, Ethnicity= case_when(
+  Ethnicity== "Mixed"~"Other",
+  TRUE~Ethnicity
+))
+TimeData <- TimeData[-c(127,128,129),]
+TimeData$Time <- c("2006-12-01","2007-12-01","2008-12-01","2009-12-01","2010-12-01","2011-12-11","2012-12-01","2013-12-01","2014-12-01","2015-12-01","2016-12-01","2017-12-01","2018-12-01","2019-12-01")
+
+
+library(lubridate)
+TimeData$Rate.per.1.000.population.by.ethnicity <- as.numeric(TimeData$Rate.per.1.000.population.by.ethnicity)
+TimeData$Time =as.Date(parse_date_time(TimeData$Time,orders=c("y","ym","ymd","dmy")))
+```
+
+## PLOT 3
+
+```{r, timeseries  plot}
+library(scales)
+
+ggplot(TimeData, aes(x = Time, y = Rate.per.1.000.population.by.ethnicity )) +
+  labs( x = "Financial Year", y = expression(atop("Stop-and-Searches per 1,000 people"))) +
+    geom_smooth(se = FALSE, formula = y ~ x, method = "loess")+
+  scale_color_ipsum(name = "Officer-defined Ethnicity")+
+  aes(colour = Ethnicity, ) +
+  facet_wrap( ~ Geography,ncol = 2)+
+     ggtitle("Stop-and-Searches By Ethnicity, Over Time", 
+           subtitle =expression(atop("From 2006 to 2019")))+
+  theme(legend.position="top")+
+    scale_x_date(date_breaks = "2 years", date_labels = "%y")+
+  theme_minimal()
+```
+
+```{r timeseries plot}
+
+```
+
