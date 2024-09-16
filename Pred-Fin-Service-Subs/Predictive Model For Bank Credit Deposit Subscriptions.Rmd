@@ -1,0 +1,369 @@
+---
+title: "Example Project: Predictive Model for Bank Credit Deposit subscriptions"
+author: "u1927969"
+output: word_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      results = "hide")
+```
+
+```{r, include=FALSE}
+# Check, install, and load packages
+check_and_install <- function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Required packages
+packages <- c(
+  "car",      # Anova function (different from lowercase "anova")
+  "MASS",     # For data manipulation
+  "Stat2Data",# For emplogitplot1 function
+  "plyr",     # For count function
+  "hnp",      # For half-normal plots
+  "arm",      # For binned residual plots
+  "DAAG",     # For cross-validation
+  "effects",  # For effects plots
+  "sjPlot",   # For odds ratios (plot_model function)
+  "ROCR",     # For basic ROC curves
+  "pROC",     # For advanced ROC curves and bootstrap intervals
+  "reshape2", # For data reshaping
+  "tidyverse",# Comprehensive data manipulation and visualization package
+  "ggmosaic", # For mosaic plots
+  "rcompanion",# For companion functions to visualize and test data
+  "ggpubr",   # For publication-ready plots
+  "corrplot", # For correlation plots
+  "oem"       # For optimization and regularization
+)
+
+# Loop through the list of packages
+lapply(packages, check_and_install)
+
+# Additional settings and customizations
+
+# Use dplyr for data manipulation (tidyverse also includes dplyr, but loaded here explicitly)
+library(dplyr)
+
+# Avoid scientific display of numbers (optional preference)
+options(scipen = 6)
+options(digits = 3)
+
+# Set default theme for ggpubr plots
+if ("ggpubr" %in% installed.packages()) {
+  theme_set(theme_pubr())
+}
+
+```
+
+```{r, reading data}
+bankmarket <- readRDS("bankmarket.rds")
+## Transform pdays into a more concise, categorical variable.
+bankmarket$pdayscategory <- cut(bankmarket$pdays, breaks=c(-Inf,7,30,Inf), labels=c("This Week", "This Month","Never"))
+
+bankmarket$month <- factor(bankmarket$month,levels=c("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"))
+bankmarket$day_of_week <- factor(bankmarket$day_of_week, levels=c("mon","tue","wed","thu","fri"))
+
+```
+
+
+```{r, code to produce barplots and histograms}
+attach(bankmarket)
+par(mfrow=c(2,2))
+##PERCENTAGE SUBSCRIBED (DEPENDENT VARIABLE)
+barplot(prop.table(summary(as.factor(subscribed))),ylim=c(0,1), main="Percentage subscribed", col="lightblue",xlab="Percentage of clientele subscribed to product", ylab="Percentage")
+
+##AGE
+hist(age, ylim=c(0,10000), xlab="Client's Age", col="indianred2", ylab="Percentage")
+  abline(v=mean(age),col="blue")
+  abline(v=c(mean(age)-2*sd(age),mean(age)+2*sd(age)),col="blue",lty=2)
+  legend("topright",legend=c("mean","+/- 2sd"),col=c("blue"),lty=c(1,2),inset=c(0.1,0.1))
+  ## CONTACT MONTH 
+  bankmarket$month <- factor(month,levels=c("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"))
+  barplot(prop.table(summary(as.factor(month))),ylim=c(0,0.4), main="Month contacted", col="khaki",ylab="Percentage",xlab=" Month",las=2)
+
+
+##CONSUMER PRICE INDEX
+hist(ConPrIdx, main="Consumer price index",breaks = seq(92,95,0.25), ylab="Frequency", xlim = c(92,95), col="cornflowerblue", xlab="Consumer Price Index when client was contacted" )
+  abline(v=mean(ConPrIdx),col="blue")
+  abline(v=c(mean(ConPrIdx)-2*sd(ConPrIdx),mean(ConPrIdx)+2*sd(ConPrIdx)),col="blue",lty=2)
+  legend("topleft",legend=c("mean","+/- 2sd"),col=c("blue"),lty=c(1,2),inset=c(0.02,0.02))
+```
+
+```{r, boxplots}
+attach(bankmarket)
+par(mfrow=c(1,1),pin=c(2.8,1.8), mar=c(2,2,2,2))
+  boxplot(age,
+          xlab="", col="indianred2")
+  title(xlab="Age", line=0.5, cex.lab=1.5)## A few outliers but no extreme values
+  boxplot(log(age),
+          xlab="", col="indianred2")
+  title(xlab="Log(Age)", line=0.5, cex.lab=1.5)
+
+
+```
+
+```{r, Bivariate plots continuous variables}
+attach(bankmarket)
+
+## Bivariate boxplots
+par(mfrow=c(1,2), cex.lab=1.6)
+boxplot(ConConIdx~subscribed,
+        xlab = "Subscribed",
+        ylab = "Consumer Confidence Index", col="lightseagreen")
+boxplot(nr_employed~subscribed,
+        xlab ="Subscribed",
+        ylab = "Number of Bank Employees", col="lightpink3")
+
+## Bivariate density plots
+Sbankmarket <- bankmarket[,c(2,11:14,16:21)]##Set of continuous variables
+density1 <- ggplot(aes(x=EmpVarRt, group=subscribed, fill=subscribed),data=Sbankmarket)+
+  geom_density(alpha=0.4)+
+  labs(x="Employment Variation Rate", y="Density")+
+  theme(axis.title.x=element_text(size=18),axis.title.y=element_text(size=18),axis.text.x = element_text(size=15),  legend.title = element_text(size=16), legend.text = element_text(size=16),legend.position = c(.2, .9),axis.text.y = element_text(size=15))+
+   scale_fill_discrete(name="Subscribed")
+
+density2 <- ggplot(aes(x=euribor3m, group=subscribed, fill=subscribed),data=Sbankmarket)+
+  geom_density( alpha=0.4)+
+  labs(x="Euribor 3 Month Rate", y="Density")+
+   theme(axis.title.x=element_text(size=18),axis.title.y=element_text(size=18),  legend.title = element_text(size=16),axis.text.x = element_text(size=15), legend.text = element_text(size=16),legend.position = c(.2, .9),axis.text.y = element_text(size=15))+
+   scale_fill_discrete(name="Subscribed")
+
+fig1 <- ggarrange(density1,density2,ncol=2,nrow=1)
+  
+```
+
+
+```{r, Bivariate Plots discrete variables}
+DiscreteBankmarket <- bankmarket[,-c(2,11:14,16:20)]##Set of categorical variables
+mosaic1 <- ggplot(DiscreteBankmarket)+
+  geom_mosaic(aes(x=product(month), fill=subscribed),offset=0.04, show.legend=FALSE)+
+  scale_fill_manual(values=c("#E45744","#588BCA"))+
+  theme(axis.text.x = element_text(angle=90,size=15),axis.title.x=element_text(size=18),axis.title.y=element_text(size=18),axis.text.y = element_text(size=15))+
+  labs(x="Month Contacted",y="Subscribed")
+
+mosaic2 <- ggplot(DiscreteBankmarket)+
+  geom_mosaic(aes(x=product(day_of_week), fill=subscribed), offset=0.02, show.legend=FALSE)+
+  scale_fill_manual(values=c("#E45744","#588BCA"))+
+  theme(axis.text.x = element_text(angle=45,hjust=1,size=15),axis.title.x=element_text(size=18),axis.title.y=element_text(size=18),axis.text.y = element_text(size=15))+
+  labs(x="Day of the Week Contacted",y="Subscribed")
+
+fig2 <- ggarrange(mosaic1,mosaic2,ncol=2)
+```
+
+```{r, emplogit function}
+Sbankmarket$subscribed <- ifelse(Sbankmarket$subscribed=="yes",1,0)
+##SEE BIBLIOGRAPHY FOR CODE SOURCE
+emplogit = function(x, y, binsize = NULL, ci = FALSE, probit = FALSE,
+                    prob = FALSE, main = NULL, xlab = "", ylab = ""){
+  # x         vector with values of the independent variable
+  # y         vector of binary responses
+  # binsize   integer value specifying bin size (optional)
+  # ci        logical value indicating whether to plot approximate
+  #           confidence intervals (not supported as of 02/08/2015)
+  # probit    logical value indicating whether to plot probits instead
+  #           of logits
+  # prob      logical value indicating whether to plot probabilities
+  #           without transforming
+  # the rest are the familiar plotting options
+
+  if (length(x) != length(y))
+    stop("x and y lengths differ")
+  if (any(y < 0 | y > 1))
+    stop("y not between 0 and 1")
+  if (length(x) < 100 & is.null(binsize))
+    stop("Less than 100 observations: specify binsize manually")
+
+  if (is.null(binsize)) binsize = min(round(length(x)/10), 50)
+
+  if (probit){
+    link = qnorm
+    if (is.null(main)) main = "Empirical probits"
+  } else {
+    link = function(x) log(x/(1-x))
+    if (is.null(main)) main = "Empirical logits"
+  }
+
+  sort = order(x)
+  x = x[sort]
+  y = y[sort]
+  a = seq(1, length(x), by=binsize)
+  b = c(a[-1] - 1, length(x))
+
+  prob = xmean = ns = rep(0, length(a)) # ns is for CIs
+  for (i in 1:length(a)){
+    range = (a[i]):(b[i])
+    prob[i] = mean(y[range])
+    xmean[i] = mean(x[range])
+    ns[i] = b[i] - a[i] + 1 # for CI 
+  }
+
+  extreme = (prob == 1 | prob == 0)
+  prob[prob == 0] = min(prob[!extreme])
+  prob[prob == 1] = max(prob[!extreme])
+
+  g = link(prob) # logits (or probits if probit == TRUE)
+
+  linear.fit = lm(g[!extreme] ~ xmean[!extreme])
+  b0 = linear.fit$coef[1]
+  b1 = linear.fit$coef[2]
+
+  loess.fit = loess(g[!extreme] ~ xmean[!extreme])
+
+    plot(xmean, g, main=main, xlab=xlab, ylab=ylab)
+    abline(b0,b1,col="royalblue4",lwd=3)
+    lines(loess.fit$x, loess.fit$fitted, lwd=3, lty=2, col=c("brown"))
+}
+
+```
+
+```{r, emplogit plots}
+attach(Sbankmarket)
+par(mfrow=c(2,2), cex.lab=1.3,cex.axis=1.3)
+  emplogit(age,subscribed, xlab="Age",ylab="Subscribed Log Odds" )
+  emplogit(campaign,subscribed, xlab="Campaign",ylab="Subscribed Log Odds")
+  emplogit(EmpVarRt,subscribed, xlab="Employee Variation Rate",ylab="Subscribed Log Odds")
+  emplogit(ConConIdx,subscribed, xlab="Consumer Confidence Rate",ylab="Subscribed Log Odds")
+
+
+```
+
+```{r, variable selection step regression}
+
+attach(bankmarket)
+
+fitNull <- glm(subscribed~1,family=binomial)
+summary(fitNull)
+
+fitAll <- glm(subscribed~marital+age+job+education+default+housing+loan+contact+month+day_of_week+campaign+previous+pdayscategory+poutcome+EmpVarRt+ConPrIdx+ConConIdx+euribor3m+nr_employed, family=binomial)
+
+summary(fitAll)
+
+
+##BIC
+fitBIC <- glm(subscribed ~ default + contact + month + day_of_week + campaign + 
+    pdayscategory + poutcome + EmpVarRt + ConPrIdx + ConConIdx + 
+    nr_employed, family=binomial)
+
+##AIC
+fitAIC <-glm(subscribed ~ job + default + contact + month + day_of_week + 
+    campaign + pdayscategory + poutcome + EmpVarRt + ConPrIdx + 
+    ConConIdx + euribor3m + nr_employed,family=binomial)
+
+anova(fitAIC,fitBIC,test="Chisq")
+
+
+```
+
+```{r, LASSO}
+bankmarketRegression <- bankmarket[,-c(11,13)]
+
+attach(bankmarket)
+
+##Need to create predictor matrix with dummy variables for factors
+
+PredictMatrix <- model.matrix(~.,data=bankmarketRegression[,c(1:18,20)])[,-1]
+head(PredictMatrix)
+groups <- c(rep(1,each=3),2,rep(3,each=11),rep(4,each=7),rep(5,each=2),rep(6,each=2),rep(7,each=2),8,rep(9,each=11),rep(10,each=4),11,12,rep(13,each=2),14:18,rep(19,each=2))
+
+length(groups)
+ncol(PredictMatrix)
+
+##Get lambda sequence
+grid=10^seq(-4,-1.3,length=50) 
+
+fitLASSO <-  oem(x=PredictMatrix,y=bankmarket$subscribed,penalty=c("grp.lasso"),family="binomial",groups=groups,lambda=grid)
+
+#Plot trace for group lasso
+plot(fitLASSO, which.model = 1, xvar = "lambda", main="Group lasso")
+plot(fitLASSO, which.model = 1, xvar = "loglambda", main="Group lasso")
+
+##SELECT BEST LAMBDA
+grid=10^seq(-4,-1.3,length=25) 
+cvfitlasso <- cv.oem(x = PredictMatrix, y = bankmarket$subscribed, family="binomial",
+                    penalty = c( "grp.lasso"), 
+                    groups = groups, nfolds = 10,lambda=grid)
+plot(cvfitlasso,which.model = 1)
+
+#Print out lambda for 1 se from mse, then log(lambda)
+cvfitlasso$lambda.1se.models
+log(cvfitlasso$lambda.1se.models)
+
+#Add solutions to trace plots
+#Group lasso
+plot(fitLASSO, which.model = 1, xvar = "loglambda", main="Group lasso")
+abline(v=log(cvfitlasso$lambda.1se.models[1]),col="red")
+abline(v=log(cvfitlasso$lambda.min.models[1]),col="blue")
+legend("topleft",legend=c("Minimum lambda", "1 standard error larger lambda"),lty=c(1,1),col=c("blue","red"), ins=0.05)
+
+# use values from cross validation
+predict(fitLASSO, s = cvfitlasso$lambda.min.models[1], which=1,type="coefficients")
+predict(fitLASSO, s = cvfitlasso$lambda.1se.models[1], which=1,type="coefficients")
+
+fittedLASSO2 <- predict(fitLASSO,s=cvfitlasso$lambda.1se.models[1],newx=PredictMatrix,type="response",which =1)
+```
+
+```{r, multicollinearity}
+vif(fitAIC)
+corrplot(cor(Sbankmarket))
+
+```
+
+```{r,  Final model}
+fitFinal <-glm(subscribed ~ job + default + contact + month + day_of_week + 
+    campaign + pdayscategory + poutcome + ConPrIdx  + nr_employed,family=binomial)
+Anova(fitFinal)
+```
+
+```{r, Final Model Coefficients, results='markup'}
+fitFinal
+```
+
+```{r, Diagnostic Plots}
+residualPlots(fitFinal, terms= ~ pdayscategory+ConPrIdx+nr_employed)
+plot(fitFinal)[4]
+max(cooks.distance(fitFinal))
+```
+
+```{r, Model Evaluation}
+bankmarket$subscribednum <- ifelse(bankmarket$subscribed=="yes",1,0)
+attach(bankmarket)
+fitCrossVal <-glm(subscribednum ~ job + default + contact + month + day_of_week + 
+    campaign + pdayscategory + poutcome + ConPrIdx  + nr_employed,family=binomial, data=bankmarket)
+CVbinary(fitCrossVal)
+cv.binary(fitCrossVal)
+
+predicted <- predict(fitCrossVal, type="response")
+boxplot(predicted~bankmarket$subscribed, xlab="Subscribed",ylab="Predicted probability", cex.lab=1.5,col="cornflowerblue",cex.axis=1.5)
+
+ypred <- predicted >0.1
+ table(bankmarket$subscribed,ypred)
+
+##Accuracy
+(36050+1051)/(36050+498+3589+1051)
+
+FPR <- 7388/(7388+29160)
+FNR <- 1523/(1523+3117)
+
+
+```
+
+```{r, Model Interpretation}
+plot_model(fitCrossVal,type="std",axis.lim = c(0.4,2),auto.label=F, axis.title="Odds Ratios")
+
+```
+
+
+```{r}
+new_customer <- data.frame(job="technician",default="no",contact="telephone",month="nov",day_of_week="thu",campaign=0,pdayscategory="Never",poutcome="nonexistent",ConPrIdx=94,nr_employed=5100)
+
+predict(fitCrossVal,new_customer,type="response")
+```
+
+
+
+
